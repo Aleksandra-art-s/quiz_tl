@@ -84,7 +84,11 @@ class UserResponse(Base):
 
 # Настраиваем соединение с базой данных
 
-DATABASE_URL = 'sqlite+aiosqlite:///data/quiz.db'
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE_URL = f"sqlite+aiosqlite:///{os.path.join(BASE_DIR, 'data', 'quiz.db')}"
+
 
 engine = create_async_engine(
     DATABASE_URL, echo=False,
