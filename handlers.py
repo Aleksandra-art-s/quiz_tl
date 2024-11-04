@@ -19,7 +19,7 @@ from keyboards import admin_main_menu, confirm_keyboard
 from aiogram.utils.exceptions import MessageNotModified
 
 # Импортируем bot из bot.py
-from bot import bot
+from bot import bot, dp
 
 def is_admin(username):
     return username in ADMIN_USERNAMES
