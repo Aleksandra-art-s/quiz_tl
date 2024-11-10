@@ -50,31 +50,31 @@ def register_handlers(dp: Dispatcher):
         username = message.from_user.username
         if await is_admin(username):
             help_text = (
-                "Доступные команды для администратора:\n"
-                "/add_quiz - Добавить новый квиз\n"
-                "/activate_quiz - Активировать квиз\n"
-                "/deactivate_quiz - Деактивировать квиз\n"
-                "/delete_quiz - Удалить квиз\n"
-                "/add_admin @username - Добавить администратора\n"
-                "/remove_admin @username - Удалить администратора\n"
-                "/help - Показать это сообщение\n\n"
-                "**Добавление квиза:**\n"
-                "Чтобы добавить новый квиз, используйте команду /add\\_quiz и следуйте инструкциям. "
-                "Вам нужно отправить данные квиза в следующем формате:\n\n"
-                "Название квиза: Название вашего квиза\n"
-                "Вопросы:\n"
-                "1\\. Текст вопроса 1\n"
-                "Ответ: Правильный ответ на вопрос 1\n"
-                "2\\. Текст вопроса 2\n"
-                "Ответ: Правильный ответ на вопрос 2\n"
-                "...\n\n"
-                "**Пример:**\n"
-                "Название квиза: Общие знания\n"
-                "Вопросы:\n"
-                "1\\. Столица Франции?\n"
-                "Ответ: Париж\n"
-                "2\\. 2 \\+ 2 = ?\n"
-                "Ответ: 4\n"
+                "Доступные команды для администратора:\\n"
+                "/add\\_quiz \\- Добавить новый квиз\\n"
+                "/activate\\_quiz \\- Активировать квиз\\n"
+                "/deactivate\\_quiz \\- Деактивировать квиз\\n"
+                "/delete\\_quiz \\- Удалить квиз\\n"
+                "/add\\_admin @username \\- Добавить администратора\\n"
+                "/remove\\_admin @username \\- Удалить администратора\\n"
+                "/help \\- Показать это сообщение\\n\\n"
+                "**Добавление квиза:**\\n"
+                "Чтобы добавить новый квиз, используйте команду /add\\_quiz и следуйте инструкциям\\. "
+                "Вам нужно отправить данные квиза в следующем формате:\\n\\n"
+                "Название квиза: Название вашего квиза\\n"
+                "Вопросы:\\n"
+                "1\\. Текст вопроса 1\\n"
+                "Ответ: Правильный ответ на вопрос 1\\n"
+                "2\\. Текст вопроса 2\\n"
+                "Ответ: Правильный ответ на вопрос 2\\n"
+                "...\\n\\n"
+                "**Пример:**\\n"
+                "Название квиза: Общие знания\\n"
+                "Вопросы:\\n"
+                "1\\. Столица Франции?\\n"
+                "Ответ: Париж\\n"
+                "2\\. 2 \\+ 2 = ?\\n"
+                "Ответ: 4\\n"
             )
             await message.reply(help_text, parse_mode='MarkdownV2')
         else:
@@ -88,10 +88,11 @@ def register_handlers(dp: Dispatcher):
     # Обработчик команды /add_quiz
     @dp.message_handler(commands=['add_quiz'])
     async def add_quiz_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
-        await message.reply(
+        instructions = (
             "Пожалуйста, отправьте данные квиза в следующем формате:\n\n"
             "Название квиза: Название вашего квиза\n"
             "Вопросы:\n"
@@ -108,6 +109,7 @@ def register_handlers(dp: Dispatcher):
             "2. 2 + 2 = ?\n"
             "Ответ: 4\n"
         )
+        await message.reply(instructions)
         await AdminStates.waiting_for_quiz_data.set()
 
     # Обработчик получения данных квиза
@@ -127,7 +129,8 @@ def register_handlers(dp: Dispatcher):
     # Команда /activate_quiz
     @dp.message_handler(commands=['activate_quiz'])
     async def activate_quiz_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
@@ -143,7 +146,8 @@ def register_handlers(dp: Dispatcher):
     # Команда /deactivate_quiz
     @dp.message_handler(commands=['deactivate_quiz'])
     async def deactivate_quiz_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
@@ -159,7 +163,8 @@ def register_handlers(dp: Dispatcher):
     # Команда /delete_quiz
     @dp.message_handler(commands=['delete_quiz'])
     async def delete_quiz_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
@@ -177,6 +182,11 @@ def register_handlers(dp: Dispatcher):
     async def process_quiz_action(callback_query: types.CallbackQuery):
         action, quiz_id = callback_query.data.split('_')
         quiz_id = int(quiz_id)
+        username = callback_query.from_user.username
+        if not await is_admin(username):
+            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
+            return
+
         if action == 'activate':
             async with async_session() as session:
                 await session.execute(
@@ -185,7 +195,7 @@ def register_handlers(dp: Dispatcher):
                     .values(is_active=True)
                 )
                 await session.commit()
-            await callback_query.message.edit_text("Квиз активирован.")
+            await callback_query.answer("Квиз активирован.", show_alert=True)
         elif action == 'deactivate':
             async with async_session() as session:
                 await session.execute(
@@ -194,16 +204,25 @@ def register_handlers(dp: Dispatcher):
                     .values(is_active=False)
                 )
                 await session.commit()
-            await callback_query.message.edit_text("Квиз деактивирован.")
+            await callback_query.answer("Квиз деактивирован.", show_alert=True)
         elif action == 'delete':
             # Запрашиваем подтверждение
-            await callback_query.message.edit_text("Вы уверены, что хотите удалить этот квиз?", reply_markup=confirm_keyboard(f'delete_confirm_{quiz_id}'))
+            await bot.send_message(
+                callback_query.from_user.id,
+                "Вы уверены, что хотите удалить этот квиз?",
+                reply_markup=confirm_keyboard(f'delete_confirm_{quiz_id}')
+            )
         await callback_query.answer()
 
     # Обработчик подтверждения удаления квиза
     @dp.callback_query_handler(lambda c: c.data.startswith('confirm_delete_confirm_'))
     async def confirm_delete_quiz(callback_query: types.CallbackQuery):
         quiz_id = int(callback_query.data.split('_')[-1])
+        username = callback_query.from_user.username
+        if not await is_admin(username):
+            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
+            return
+
         async with async_session() as session:
             # Удаляем ответы
             await session.execute(
@@ -224,8 +243,7 @@ def register_handlers(dp: Dispatcher):
                 Quiz.__table__.delete().where(Quiz.quiz_id == quiz_id)
             )
             await session.commit()
-        await callback_query.message.edit_text("Квиз успешно удален.")
-        await callback_query.answer()
+        await callback_query.answer("Квиз успешно удален.", show_alert=True)
 
     # Обработчик команды /quiz для пользователей
     @dp.message_handler(commands=['quiz'])
@@ -332,7 +350,8 @@ def register_handlers(dp: Dispatcher):
     # Обработчики для управления администраторами
     @dp.message_handler(commands=['add_admin'])
     async def add_admin_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         args = message.get_args()
@@ -343,7 +362,7 @@ def register_handlers(dp: Dispatcher):
         async with async_session() as session:
             # Проверяем, есть ли уже такой администратор
             result = await session.execute(
-                Admin.__table__.select().where(Admin.username == new_admin_username)
+                Admin.__table__.select().where(Admin.username.ilike(new_admin_username))
             )
             existing_admin = result.fetchone()
             if existing_admin:
@@ -359,7 +378,8 @@ def register_handlers(dp: Dispatcher):
 
     @dp.message_handler(commands=['remove_admin'])
     async def remove_admin_handler(message: types.Message):
-        if not await is_admin(message.from_user.username):
+        username = message.from_user.username
+        if not await is_admin(username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         args = message.get_args()
@@ -369,12 +389,12 @@ def register_handlers(dp: Dispatcher):
         admin_username = args.strip().lstrip('@').lower()
         async with async_session() as session:
             result = await session.execute(
-                Admin.__table__.select().where(Admin.username == admin_username)
+                Admin.__table__.select().where(Admin.username.ilike(admin_username))
             )
             admin = result.fetchone()
             if admin:
                 await session.execute(
-                    Admin.__table__.delete().where(Admin.username == admin_username)
+                    Admin.__table__.delete().where(Admin.username.ilike(admin_username))
                 )
                 await session.commit()
                 await message.reply(f"Пользователь @{admin_username} удален из списка администраторов.")
@@ -383,8 +403,13 @@ def register_handlers(dp: Dispatcher):
 
     # Обработчик для нажатий на кнопки меню администратора
     @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
-    async def process_admin_menu(callback_query: types.CallbackQuery):
+    async def process_admin_menu(callback_query: types.CallbackQuery, state: FSMContext):
         action = callback_query.data
+        username = callback_query.from_user.username
+        if not await is_admin(username):
+            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
+            return
+
         if action == 'admin_add_quiz':
             await add_quiz_handler(callback_query.message)
         elif action == 'admin_activate_quiz':
@@ -456,4 +481,5 @@ def register_handlers(dp: Dispatcher):
                 await session.commit()
             quiz_info['quiz_id'] = new_quiz.quiz_id
 
-# Обратите внимание: вызов функции register_handlers(dp) должен быть только в файле app.py, а не внутри handlers.py.
+# Регистрируем обработчики
+register_handlers(dp)
