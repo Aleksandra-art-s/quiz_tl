@@ -131,6 +131,7 @@ def register_handlers(dp: Dispatcher):
     async def process_admin_menu(callback_query: types.CallbackQuery):
         action = callback_query.data
         username = callback_query.from_user.username  # Используем from_user
+        logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
@@ -206,6 +207,7 @@ def register_handlers(dp: Dispatcher):
         action, quiz_id = callback_query.data.split('_')
         quiz_id = int(quiz_id)
         username = callback_query.from_user.username  # Используем from_user
+        logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
@@ -242,6 +244,7 @@ def register_handlers(dp: Dispatcher):
     async def confirm_delete_quiz(callback_query: types.CallbackQuery):
         quiz_id = int(callback_query.data.split('_')[-1])
         username = callback_query.from_user.username  # Используем from_user
+        logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
