@@ -1,7 +1,14 @@
 # handlers.py
 
+import logging
 from aiogram import types, Dispatcher
-from config import ADMIN_USERNAMES
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters import Command
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from datetime import datetime, timedelta
+
+from bot import dp, bot
+from helpers import is_admin
 from database import (
     async_session,
     User,
@@ -10,25 +17,13 @@ from database import (
     Answer,
     UserAttempt,
     UserResponse,
+    Admin,
 )
-from datetime import datetime, timedelta
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from keyboards import admin_main_menu, confirm_keyboard
-from aiogram.utils.exceptions import MessageNotModified
+from keyboards import admin_main_menu, confirm_keyboard, quiz_list_keyboard
 
-# Импортируем bot из bot.py
-from bot import bot, dp
-
-def is_admin(username):
-    return username in ADMIN_USERNAMES
-
-# Состояния для машины состояний
+# Состояния для FSM
 class AdminStates(StatesGroup):
-    waiting_for_quiz_title = State()
-    waiting_for_question_text = State()
-    waiting_for_answer_options = State()
+    waiting_for_quiz_data = State()
     confirming_quiz_activation = State()
 
 class QuizStates(StatesGroup):
@@ -40,403 +35,124 @@ def register_handlers(dp: Dispatcher):
     @dp.message_handler(commands=['start'])
     async def send_welcome(message: types.Message):
         username = message.from_user.username
-        if is_admin(username):
+        if await is_admin(username):
             await message.reply(
-                "Добро пожаловать в панель администратора.",
+                "Добро пожаловать в панель администратора.\nВведите /help для просмотра доступных команд.",
                 reply_markup=admin_main_menu()
             )
         else:
             await message.reply(
-                "Привет! Готовы начать квиз? Напишите /quiz, чтобы начать."
+                "Привет! Готовы начать квиз? Напишите /quiz, чтобы начать.\nВведите /help для просмотра доступных команд."
             )
 
-    # Обработчик команды /quiz для пользователей
-    @dp.message_handler(commands=['quiz'])
-    async def start_quiz(message: types.Message, state: FSMContext):
-        user_id = message.from_user.id
+    # Команда /help
+    @dp.message_handler(commands=['help'])
+    async def help_handler(message: types.Message):
         username = message.from_user.username
+        if await is_admin(username):
+            help_text = (
+                "Доступные команды для администратора:\n"
+                "/add_quiz - Добавить новый квиз\n"
+                "/activate_quiz - Активировать квиз\n"
+                "/deactivate_quiz - Деактивировать квиз\n"
+                "/delete_quiz - Удалить квиз\n"
+                "/add_admin @username - Добавить администратора\n"
+                "/remove_admin @username - Удалить администратора\n"
+                "/help - Показать это сообщение\n"
+            )
+        else:
+            help_text = (
+                "Доступные команды для пользователя:\n"
+                "/quiz - Начать квиз\n"
+                "/help - Показать это сообщение\n"
+            )
+        await message.reply(help_text)
 
+    # Обработчик команды /add_quiz
+    @dp.message_handler(commands=['add_quiz'])
+    async def add_quiz_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
+            return
+        await message.reply(
+            "Пожалуйста, отправьте данные квиза в следующем формате:\n\n"
+            "Название квиза: Название вашего квиза\n"
+            "Вопросы:\n"
+            "1. Текст вопроса 1\n"
+            "Ответ: Правильный ответ\n"
+            "2. Текст вопроса 2\n"
+            "Ответ: Правильный ответ\n"
+        )
+        await AdminStates.waiting_for_quiz_data.set()
+
+    # Обработчик получения данных квиза
+    @dp.message_handler(state=AdminStates.waiting_for_quiz_data)
+    async def process_quiz_data(message: types.Message, state: FSMContext):
+        quiz_data = message.text
+        try:
+            quiz_info = parse_quiz_data(quiz_data)
+            await save_quiz_to_db(quiz_info)
+            await message.reply("Квиз успешно создан и сохранен.")
+            await state.finish()
+        except Exception as e:
+            logging.exception("Ошибка при парсинге квиза.")
+            await message.reply(f"Ошибка при создании квиза: {str(e)}\nПожалуйста, проверьте формат и попробуйте снова.")
+            await state.finish()
+
+    # Команда /activate_quiz
+    @dp.message_handler(commands=['activate_quiz'])
+    async def activate_quiz_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
+            return
         async with async_session() as session:
-            # Проверяем, есть ли активный квиз
+            result = await session.execute(
+                Quiz.__table__.select().where(Quiz.is_active == False)
+            )
+            quizzes = result.fetchall()
+            if not quizzes:
+                await message.reply("Нет неактивных квизов.")
+                return
+            await message.reply("Выберите квиз для активации:", reply_markup=quiz_list_keyboard(quizzes, 'activate'))
+
+    # Команда /deactivate_quiz
+    @dp.message_handler(commands=['deactivate_quiz'])
+    async def deactivate_quiz_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
+            return
+        async with async_session() as session:
             result = await session.execute(
                 Quiz.__table__.select().where(Quiz.is_active == True)
             )
-            quiz = result.fetchone()
-            if not quiz:
-                await message.reply("В данный момент нет активных квизов.")
+            quizzes = result.fetchall()
+            if not quizzes:
+                await message.reply("Нет активных квизов.")
                 return
+            await message.reply("Выберите квиз для деактивации:", reply_markup=quiz_list_keyboard(quizzes, 'deactivate'))
 
-            # Проверяем, участвовал ли пользователь в этом квизе и выигрывал ли
-            result = await session.execute(
-                UserAttempt.__table__.select().where(
-                    (UserAttempt.user_id == user_id)
-                    & (UserAttempt.quiz_id == quiz.quiz_id)
-                    & (UserAttempt.is_winner == True)
-                )
-            )
-            attempt = result.fetchone()
-            if attempt:
-                await message.reply(
-                    "Вы уже выиграли в этом квизе. Дождитесь следующего квиза!"
-                )
-                return
-
-            # Проверяем, участвовал ли пользователь сегодня
-            result = await session.execute(
-                UserAttempt.__table__.select().where(
-                    (UserAttempt.user_id == user_id)
-                    & (UserAttempt.quiz_id == quiz.quiz_id)
-                ).order_by(UserAttempt.attempt_time.desc())
-            )
-            attempt = result.fetchone()
-            if attempt and attempt.attempt_time.date() == datetime.utcnow().date():
-                await message.reply(
-                    "Вы уже участвовали в квизе сегодня. Попробуйте снова завтра."
-                )
-                return
-
-            # Если пользователь новый, добавляем его в базу данных
-            result = await session.execute(
-                User.__table__.select().where(User.user_id == user_id)
-            )
-            user = result.fetchone()
-            if not user:
-                new_user = User(user_id=user_id, username=username)
-                session.add(new_user)
-                await session.commit()
-
-            # Начинаем квиз
-            await message.reply("Начинаем квиз!")
-
-            # Получаем вопросы
-            result = await session.execute(
-                Question.__table__.select().where(
-                    Question.quiz_id == quiz.quiz_id
-                )
-            )
-            questions = result.fetchall()
-
-            # Сохраняем попытку пользователя
-            new_attempt = UserAttempt(
-                user_id=user_id,
-                quiz_id=quiz.quiz_id,
-                attempt_time=datetime.utcnow(),
-                correct_answers=0,
-                is_winner=False,
-            )
-            session.add(new_attempt)
-            await session.commit()
-
-            # Сохраняем данные в FSMContext
-            await state.update_data(
-                attempt_id=new_attempt.attempt_id,
-                questions=questions,
-                current_question=0,
-                correct_answers=0,
-            )
-
-            # Устанавливаем состояние
-            await QuizStates.answering_questions.set()
-
-            # Отправляем первый вопрос
-            await send_question(message.chat.id, state)
-
-    # Функция для отправки вопроса
-    async def send_question(chat_id, state: FSMContext):
-        data = await state.get_data()
-        questions = data['questions']
-        current_question = data['current_question']
-
-        if current_question < len(questions):
-            question = questions[current_question]
-
-            async with async_session() as session:
-                # Получаем ответы на вопрос
-                result = await session.execute(
-                    Answer.__table__.select().where(
-                        Answer.question_id == question.question_id
-                    )
-                )
-                answers = result.fetchall()
-
-            # Создаем кнопки с вариантами ответов
-            buttons = []
-            for a in answers:
-                buttons.append(
-                    types.InlineKeyboardButton(
-                        a.text,
-                        callback_data=f"answer_{a.answer_id}"
-                    )
-                )
-
-            keyboard = types.InlineKeyboardMarkup(row_width=1)
-            keyboard.add(*buttons)
-
-            await bot.send_message(chat_id, question.text, reply_markup=keyboard)
-        else:
-            # Квиз завершен
-            await finish_quiz(chat_id, state)
-
-    # Обработчик ответов на вопросы
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('answer_'), state=QuizStates.answering_questions)
-    async def process_answer(callback_query: types.CallbackQuery, state: FSMContext):
-        data = callback_query.data.split('_')
-        answer_id = int(data[1])
-        user_id = callback_query.from_user.id
-
-        async with async_session() as session:
-            # Проверяем, правильный ли ответ
-            result = await session.execute(
-                Answer.__table__.select().where(Answer.answer_id == answer_id)
-            )
-            answer = result.fetchone()
-
-            data = await state.get_data()
-            correct_answers = data['correct_answers']
-            current_question = data['current_question']
-            questions = data['questions']
-            attempt_id = data['attempt_id']
-
-            if answer.is_correct:
-                correct_answers += 1
-
-            current_question += 1
-
-            # Обновляем данные в FSMContext
-            await state.update_data(
-                correct_answers=correct_answers,
-                current_question=current_question,
-            )
-
-            # Сохраняем ответ пользователя
-            new_response = UserResponse(
-                attempt_id=attempt_id,
-                question_id=answer.question_id,
-                selected_answer_id=answer.answer_id,
-            )
-            session.add(new_response)
-            await session.commit()
-
-            await bot.answer_callback_query(callback_query.id)
-            await send_question(callback_query.from_user.id, state)
-
-    # Функция для завершения квиза
-    async def finish_quiz(chat_id, state: FSMContext):
-        data = await state.get_data()
-        correct_answers = data['correct_answers']
-        total_questions = len(data['questions'])
-        attempt_id = data['attempt_id']
-
-        async with async_session() as session:
-            # Обновляем информацию о попытке
-            is_winner = correct_answers == total_questions
-            await session.execute(
-                UserAttempt.__table__.update()
-                .where(UserAttempt.attempt_id == attempt_id)
-                .values(
-                    correct_answers=correct_answers,
-                    is_winner=is_winner,
-                )
-            )
-            await session.commit()
-
-        if is_winner:
-            await bot.send_message(
-                chat_id,
-                f'Поздравляем! Вы ответили правильно на все вопросы.',
-            )
-            await bot.send_message(
-                chat_id,
-                'Пожалуйста, введите ваш email для получения приза:'
-            )
-            # Устанавливаем состояние ожидания email
-            await QuizStates.waiting_for_email.set()
-        else:
-            await bot.send_message(
-                chat_id,
-                f'Вы ответили правильно на {correct_answers} из {total_questions} вопросов. Попробуйте снова завтра!',
-            )
-            # Сбрасываем состояние
-            await state.finish()
-
-    # Обработчик ввода email
-    @dp.message_handler(state=QuizStates.waiting_for_email)
-    async def process_email(message: types.Message, state: FSMContext):
-        user_id = message.from_user.id
-        email = message.text.strip()
-
-        # Простая проверка на наличие символа '@' и '.'
-        if '@' in email and '.' in email:
-            async with async_session() as session:
-                # Обновляем email пользователя
-                await session.execute(
-                    User.__table__.update()
-                    .where(User.user_id == user_id)
-                    .values(email=email)
-                )
-                await session.commit()
-
-            await message.reply(
-                'Спасибо! Ваш email сохранен. Мы свяжемся с вами для получения приза.'
-            )
-            # Сбрасываем состояние
-            await state.finish()
-        else:
-            await message.reply(
-                'Похоже, вы ввели некорректный email. Пожалуйста, попробуйте снова.'
-            )
-
-    # Обработчик нажатий на кнопки администратора
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('admin_'))
-    async def process_admin_callback(callback_query: types.CallbackQuery, state: FSMContext):
-        username = callback_query.from_user.username
-        if not is_admin(username):
-            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
+    # Команда /delete_quiz
+    @dp.message_handler(commands=['delete_quiz'])
+    async def delete_quiz_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
             return
-
-        action = callback_query.data
-
-        if action == 'admin_add_quiz':
-            await callback_query.message.edit_text("Введите название нового квиза:")
-            await AdminStates.waiting_for_quiz_title.set()
-        elif action == 'admin_list_quizzes':
-            async with async_session() as session:
-                result = await session.execute(
-                    Quiz.__table__.select()
-                )
-                quizzes = result.fetchall()
-
-                if not quizzes:
-                    await callback_query.message.edit_text("Квизы не найдены.")
-                    return
-
-                response = "Список квизов:\n"
-                for quiz in quizzes:
-                    status = "Активен" if quiz.is_active else "Не активен"
-                    response += f"ID: {quiz.quiz_id}, Название: {quiz.title}, Статус: {status}\n"
-
-                await callback_query.message.edit_text(response)
-        elif action == 'admin_help':
-            await callback_query.message.edit_text(
-                "Доступные команды:\n"
-                "/start - Главное меню\n"
-                "Используйте кнопки для управления квизами."
-            )
-        await callback_query.answer()
-
-    # Обработчик ввода названия квиза
-    @dp.message_handler(state=AdminStates.waiting_for_quiz_title)
-    async def process_quiz_title(message: types.Message, state: FSMContext):
-        quiz_title = message.text.strip()
-        await state.update_data(quiz_title=quiz_title)
-
         async with async_session() as session:
-            new_quiz = Quiz(
-                title=quiz_title,
-                is_active=False,  # По умолчанию квиз не активен
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(days=7),
-                question_count=0,  # Пока вопросов нет
+            result = await session.execute(
+                Quiz.__table__.select()
             )
-            session.add(new_quiz)
-            await session.commit()
-
-            await state.update_data(quiz_id=new_quiz.quiz_id)
-
-        await message.reply("Квиз создан. Теперь введите текст первого вопроса:")
-        await AdminStates.waiting_for_question_text.set()
-
-    # Обработчик ввода текста вопроса
-    @dp.message_handler(state=AdminStates.waiting_for_question_text)
-    async def process_question_text(message: types.Message, state: FSMContext):
-        question_text = message.text.strip()
-        await state.update_data(question_text=question_text, answers=[])
-
-        await message.reply(
-            "Введите варианты ответов в формате:\n"
-            "Текст ответа | правильный (да/нет)\n"
-            "Вводите по одному варианту на сообщение. Когда закончите, отправьте команду /done."
-        )
-        await AdminStates.waiting_for_answer_options.set()
-
-    # Обработчик ввода вариантов ответов
-    @dp.message_handler(state=AdminStates.waiting_for_answer_options)
-    async def process_answer_options(message: types.Message, state: FSMContext):
-        if message.text.strip() == '/done':
-            data = await state.get_data()
-            answers = data['answers']
-            if len(answers) < 2:
-                await message.reply("Должно быть минимум 2 варианта ответа.")
+            quizzes = result.fetchall()
+            if not quizzes:
+                await message.reply("Нет квизов для удаления.")
                 return
+            await message.reply("Выберите квиз для удаления:", reply_markup=quiz_list_keyboard(quizzes, 'delete'))
 
-            correct_answers = [ans for ans in answers if ans['is_correct']]
-            if len(correct_answers) == 0:
-                await message.reply("Должен быть хотя бы один правильный ответ.")
-                return
-
-            quiz_id = data['quiz_id']
-            question_text = data['question_text']
-
-            async with async_session() as session:
-                # Создаем вопрос
-                new_question = Question(
-                    quiz_id=quiz_id,
-                    text=question_text
-                )
-                session.add(new_question)
-                await session.commit()
-
-                # Добавляем ответы
-                for ans in answers:
-                    new_answer = Answer(
-                        question_id=new_question.question_id,
-                        text=ans['text'],
-                        is_correct=ans['is_correct']
-                    )
-                    session.add(new_answer)
-                await session.commit()
-
-                # Обновляем количество вопросов в квизе
-                await session.execute(
-                    Quiz.__table__.update()
-                    .where(Quiz.quiz_id == quiz_id)
-                    .values(question_count=Quiz.question_count + 1)
-                )
-                await session.commit()
-
-            await message.reply("Вопрос и ответы сохранены. Хотите добавить еще один вопрос?", reply_markup=confirm_keyboard('add_another_question'))
-            await AdminStates.confirming_quiz_activation.set()
-        else:
-            # Обрабатываем вариант ответа
-            parts = message.text.strip().split('|')
-            if len(parts) != 2:
-                await message.reply("Пожалуйста, используйте формат:\nТекст ответа | правильный (да/нет)")
-                return
-
-            answer_text = parts[0].strip()
-            is_correct_str = parts[1].strip().lower()
-            is_correct = is_correct_str == 'да'
-
-            data = await state.get_data()
-            answers = data['answers']
-            answers.append({
-                'text': answer_text,
-                'is_correct': is_correct
-            })
-            await state.update_data(answers=answers)
-
-            await message.reply("Ответ сохранен. Введите следующий вариант или отправьте /done, чтобы закончить.")
-
-    # Обработчик подтверждения активации квиза или добавления еще вопросов
-    @dp.callback_query_handler(lambda c: c.data.startswith('confirm_') or c.data == 'cancel_action', state=AdminStates.confirming_quiz_activation)
-    async def process_confirmation(callback_query: types.CallbackQuery, state: FSMContext):
-        if callback_query.data == 'confirm_add_another_question':
-            await callback_query.message.edit_text("Введите текст следующего вопроса:")
-            await AdminStates.waiting_for_question_text.set()
-        elif callback_query.data == 'confirm_activate_quiz':
-            data = await state.get_data()
-            quiz_id = data['quiz_id']
-
+    # Обработчик нажатий на кнопки активации, деактивации и удаления квиза
+    @dp.callback_query_handler(lambda c: c.data.startswith(('activate_', 'deactivate_', 'delete_')))
+    async def process_quiz_action(callback_query: types.CallbackQuery):
+        action, quiz_id = callback_query.data.split('_')
+        quiz_id = int(quiz_id)
+        if action == 'activate':
             async with async_session() as session:
                 await session.execute(
                     Quiz.__table__.update()
@@ -444,16 +160,244 @@ def register_handlers(dp: Dispatcher):
                     .values(is_active=True)
                 )
                 await session.commit()
-
-            await callback_query.message.edit_text("Квиз активирован и готов для пользователей.")
-            await state.finish()
-        elif callback_query.data == 'cancel_action':
-            await callback_query.message.edit_text("Действие отменено. Возвращаюсь в главное меню.", reply_markup=admin_main_menu())
-            await state.finish()
+            await callback_query.message.edit_text("Квиз активирован.")
+        elif action == 'deactivate':
+            async with async_session() as session:
+                await session.execute(
+                    Quiz.__table__.update()
+                    .where(Quiz.quiz_id == quiz_id)
+                    .values(is_active=False)
+                )
+                await session.commit()
+            await callback_query.message.edit_text("Квиз деактивирован.")
+        elif action == 'delete':
+            # Запрашиваем подтверждение
+            await callback_query.message.edit_text("Вы уверены, что хотите удалить этот квиз?", reply_markup=confirm_keyboard(f'delete_confirm_{quiz_id}'))
         await callback_query.answer()
 
-    # Обработчик любых сообщений от администратора для возврата в главное меню
-    @dp.message_handler(lambda message: is_admin(message.from_user.username))
-    async def admin_default(message: types.Message):
-        await message.reply("Выберите действие из меню ниже.", reply_markup=admin_main_menu())
+    # Обработчик подтверждения удаления квиза
+    @dp.callback_query_handler(lambda c: c.data.startswith('confirm_delete_confirm_'))
+    async def confirm_delete_quiz(callback_query: types.CallbackQuery):
+        quiz_id = int(callback_query.data.split('_')[-1])
+        async with async_session() as session:
+            # Удаляем ответы
+            await session.execute(
+                Answer.__table__.delete().where(
+                    Answer.question_id.in_(
+                        session.query(Question.question_id).filter(
+                            Question.quiz_id == quiz_id
+                        )
+                    )
+                )
+            )
+            # Удаляем вопросы
+            await session.execute(
+                Question.__table__.delete().where(Question.quiz_id == quiz_id)
+            )
+            # Удаляем квиз
+            await session.execute(
+                Quiz.__table__.delete().where(Quiz.quiz_id == quiz_id)
+            )
+            await session.commit()
+        await callback_query.message.edit_text("Квиз успешно удален.")
+        await callback_query.answer()
 
+    # Обработчик команды /quiz для пользователей
+    @dp.message_handler(commands=['quiz'])
+    async def start_quiz(message: types.Message, state: FSMContext):
+        async with async_session() as session:
+            result = await session.execute(
+                Quiz.__table__.select().where(Quiz.is_active == True)
+            )
+            quiz = result.fetchone()
+            if not quiz:
+                await message.reply("Сейчас нет доступных квизов.")
+                return
+            result = await session.execute(
+                Question.__table__.select().where(Question.quiz_id == quiz.quiz_id)
+            )
+            questions = result.fetchall()
+            await state.update_data(
+                questions=questions,
+                current_question=0,
+                correct_answers=0,
+                quiz_id=quiz.quiz_id
+            )
+            # Создаем попытку
+            new_attempt = UserAttempt(
+                user_id=message.from_user.id,
+                quiz_id=quiz.quiz_id,
+                timestamp=datetime.utcnow(),
+                correct_answers=0,
+                is_winner=False
+            )
+            session.add(new_attempt)
+            await session.commit()
+            await state.update_data(attempt_id=new_attempt.attempt_id)
+            await send_question(message.chat.id, state)
+            await QuizStates.answering_questions.set()
+
+    # Функция отправки вопроса
+    async def send_question(chat_id, state: FSMContext):
+        data = await state.get_data()
+        questions = data['questions']
+        current_question = data['current_question']
+
+        if current_question < len(questions):
+            question = questions[current_question]
+            await bot.send_message(chat_id, question.text)
+        else:
+            # Квиз завершен
+            await finish_quiz(chat_id, state)
+
+    # Обработка ответов пользователей
+    @dp.message_handler(state=QuizStates.answering_questions)
+    async def process_answer(message: types.Message, state: FSMContext):
+        user_answer = message.text.strip().lower()
+        data = await state.get_data()
+        correct_answers = data.get('correct_answers', 0)
+        current_question = data.get('current_question', 0)
+        questions = data['questions']
+        attempt_id = data['attempt_id']
+        question = questions[current_question]
+
+        async with async_session() as session:
+            result = await session.execute(
+                Answer.__table__.select().where(Answer.question_id == question.question_id)
+            )
+            correct_answer = result.scalar_one()
+            correct_answer_text = correct_answer.text.strip().lower()
+
+            if user_answer == correct_answer_text:
+                correct_answers += 1
+
+            # Сохраняем ответ пользователя
+            new_response = UserResponse(
+                attempt_id=attempt_id,
+                question_id=question.question_id,
+                selected_answer_text=user_answer,
+            )
+            session.add(new_response)
+            await session.commit()
+
+        current_question += 1
+        await state.update_data(
+            correct_answers=correct_answers,
+            current_question=current_question,
+        )
+
+        await send_question(message.chat.id, state)
+
+    # Завершение квиза
+    async def finish_quiz(chat_id, state: FSMContext):
+        data = await state.get_data()
+        correct_answers = data.get('correct_answers', 0)
+        attempt_id = data.get('attempt_id')
+        async with async_session() as session:
+            # Обновляем попытку
+            await session.execute(
+                UserAttempt.__table__.update()
+                .where(UserAttempt.attempt_id == attempt_id)
+                .values(correct_answers=correct_answers)
+            )
+            await session.commit()
+        await bot.send_message(chat_id, f"Квиз завершен! Вы ответили правильно на {correct_answers} вопросов.")
+        await state.finish()
+
+    # Обработчики для управления администраторами
+    @dp.message_handler(Command('add_admin'))
+    async def add_admin_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
+            return
+        args = message.get_args()
+        if not args:
+            await message.reply("Пожалуйста, укажите юзернейм нового администратора после команды.")
+            return
+        new_admin_username = args.strip().lstrip('@')
+        async with async_session() as session:
+            new_admin = Admin(username=new_admin_username)
+            session.add(new_admin)
+            try:
+                await session.commit()
+                await message.reply(f"Пользователь @{new_admin_username} добавлен в список администраторов.")
+            except Exception as e:
+                await message.reply(f"Ошибка при добавлении администратора: {e}")
+
+    @dp.message_handler(Command('remove_admin'))
+    async def remove_admin_handler(message: types.Message):
+        if not await is_admin(message.from_user.username):
+            await message.reply("У вас нет прав для выполнения этой команды.")
+            return
+        args = message.get_args()
+        if not args:
+            await message.reply("Пожалуйста, укажите юзернейм администратора для удаления после команды.")
+            return
+        admin_username = args.strip().lstrip('@')
+        async with async_session() as session:
+            result = await session.execute(
+                Admin.__table__.select().where(Admin.username == admin_username)
+            )
+            admin = result.fetchone()
+            if admin:
+                await session.execute(
+                    Admin.__table__.delete().where(Admin.username == admin_username)
+                )
+                await session.commit()
+                await message.reply(f"Пользователь @{admin_username} удален из списка администраторов.")
+            else:
+                await message.reply("Такой администратор не найден.")
+
+    # Обработчик для всех сообщений (для тестирования)
+    @dp.message_handler()
+    async def handle_all_messages(message: types.Message):
+        logging.info(f"Получено сообщение: {message.text}")
+        await message.reply("Бот получил ваше сообщение.")
+
+# Функция для парсинга данных квиза из сообщения
+def parse_quiz_data(text):
+    lines = text.strip().split('\n')
+    quiz_info = {}
+    questions = []
+    current_question = None
+    for line in lines:
+        line = line.strip()
+        if line.startswith('Название квиза:'):
+            quiz_info['title'] = line[len('Название квиза:'):].strip()
+        elif line.startswith(('1.', '2.', '3.', '4.', '5.')):
+            if current_question:
+                questions.append(current_question)
+            current_question = {'text': line[line.find('.') + 1:].strip(), 'answer': ''}
+        elif line.startswith('Ответ:'):
+            current_question['answer'] = line[len('Ответ:'):].strip()
+    if current_question:
+        questions.append(current_question)
+    quiz_info['questions'] = questions
+    return quiz_info
+
+# Функция для сохранения квиза в базу данных
+async def save_quiz_to_db(quiz_info):
+    async with async_session() as session:
+        new_quiz = Quiz(
+            title=quiz_info['title'],
+            is_active=False,
+            start_time=datetime.utcnow(),
+            end_time=datetime.utcnow() + timedelta(days=7),
+            question_count=len(quiz_info['questions']),
+        )
+        session.add(new_quiz)
+        await session.commit()
+        for q in quiz_info['questions']:
+            new_question = Question(
+                quiz_id=new_quiz.quiz_id,
+                text=q['text']
+            )
+            session.add(new_question)
+            await session.commit()
+            new_answer = Answer(
+                question_id=new_question.question_id,
+                text=q['answer']
+            )
+            session.add(new_answer)
+            await session.commit()
+        quiz_info['quiz_id'] = new_quiz.quiz_id
