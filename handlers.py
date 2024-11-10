@@ -58,32 +58,32 @@ def register_handlers(dp: Dispatcher):
                 "/add\\_admin @username \\- Добавить администратора\\n"
                 "/remove\\_admin @username \\- Удалить администратора\\n"
                 "/help \\- Показать это сообщение\\n\\n"
-                "**Добавление квиза:**\\n"
+                "**Добавление квиза\\:**\\n"
                 "Чтобы добавить новый квиз, используйте команду /add\\_quiz и следуйте инструкциям\\. "
-                "Вам нужно отправить данные квиза в следующем формате:\\n\\n"
-                "Название квиза: Название вашего квиза\\n"
-                "Вопросы:\\n"
+                "Вам нужно отправить данные квиза в следующем формате\\:\\n\\n"
+                "Название квиза\\: Название вашего квиза\\n"
+                "Вопросы\\:\\n"
                 "1\\. Текст вопроса 1\\n"
-                "Ответ: Правильный ответ на вопрос 1\\n"
+                "Ответ\\: Правильный ответ на вопрос 1\\n"
                 "2\\. Текст вопроса 2\\n"
-                "Ответ: Правильный ответ на вопрос 2\\n"
-                "...\\n\\n"
-                "**Пример:**\\n"
-                "Название квиза: Общие знания\\n"
-                "Вопросы:\\n"
-                "1\\. Столица Франции?\\n"
-                "Ответ: Париж\\n"
-                "2\\. 2 \\+ 2 = ?\\n"
-                "Ответ: 4\\n"
+                "Ответ\\: Правильный ответ на вопрос 2\\n"
+                "\\.\\.\\.\\n\\n"
+                "**Пример\\:**\\n"
+                "Название квиза\\: Общие знания\\n"
+                "Вопросы\\:\\n"
+                "1\\. Столица Франции\\?\\n"
+                "Ответ\\: Париж\\n"
+                "2\\. 2 \\+ 2 \\= \\?\\n"
+                "Ответ\\: 4\\n"
             )
             await message.reply(help_text, parse_mode='MarkdownV2')
         else:
             help_text = (
-                "Доступные команды для пользователя:\n"
-                "/quiz - Начать квиз\n"
-                "/help - Показать это сообщение\n"
+                "Доступные команды для пользователя:\\n"
+                "/quiz \\- Начать квиз\\n"
+                "/help \\- Показать это сообщение\\n"
             )
-            await message.reply(help_text)
+            await message.reply(help_text, parse_mode='MarkdownV2')
 
     # Обработчик команды /add_quiz
     async def add_quiz_handler(user_id):
@@ -282,16 +282,17 @@ def register_handlers(dp: Dispatcher):
             result = await session.execute(
                 Quiz.__table__.select().where(Quiz.is_active == True)
             )
-            quiz = result.fetchone()
-            if not quiz:
+            quiz_row = result.fetchone()
+            if not quiz_row:
                 await message.reply("Сейчас нет доступных квизов.")
                 return
+            quiz = Quiz(**quiz_row)
             result = await session.execute(
                 Question.__table__.select().where(Question.quiz_id == quiz.quiz_id)
             )
             questions = result.fetchall()
             await state.update_data(
-                questions=questions,
+                questions=[Question(**q) for q in questions],
                 current_question=0,
                 correct_answers=0,
                 quiz_id=quiz.quiz_id
@@ -338,8 +339,14 @@ def register_handlers(dp: Dispatcher):
             result = await session.execute(
                 Answer.__table__.select().where(Answer.question_id == question.question_id)
             )
-            correct_answer = result.scalar_one()
-            correct_answer_text = correct_answer.text.strip().lower()
+            correct_answer_row = result.fetchone()
+            if correct_answer_row:
+                correct_answer = Answer(**correct_answer_row)
+                correct_answer_text = correct_answer.text.strip().lower()
+            else:
+                await message.reply("Ошибка: не найден правильный ответ на вопрос.")
+                await state.finish()
+                return
 
             if user_answer == correct_answer_text:
                 correct_answers += 1
