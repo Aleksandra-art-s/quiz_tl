@@ -10,7 +10,7 @@ async def is_admin(username):
     normalized_username = username.lstrip('@').lower()
     async with async_session() as session:
         result = await session.execute(
-            Admin.__table__.select().where(Admin.username == normalized_username)
+            Admin.__table__.select().where(Admin.username.ilike(normalized_username))
         )
         admin = result.fetchone()
         is_admin = admin is not None
