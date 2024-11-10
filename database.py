@@ -76,6 +76,6 @@ async def init_db():
         result = await session.execute(Admin.__table__.select())
         admins = result.fetchall()
         if not admins:
-            new_admin = Admin(username='MaierrA')  # Замените на ваш юзернейм
+            new_admin = Admin(username='MaierrA'.lower())  # Замените на ваш юзернейм
             session.add(new_admin)
             await session.commit()
