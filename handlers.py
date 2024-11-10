@@ -126,6 +126,29 @@ def register_handlers(dp: Dispatcher):
             await message.reply(f"Ошибка при создании квиза: {str(e)}\nПожалуйста, проверьте формат и попробуйте снова.")
             await state.finish()
 
+    # Обработчик нажатий на кнопки меню администратора
+    @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
+    async def process_admin_menu(callback_query: types.CallbackQuery):
+        action = callback_query.data
+        username = callback_query.from_user.username  # Используем from_user
+        if not await is_admin(username):
+            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
+            return
+
+        if action == 'admin_add_quiz':
+            await add_quiz_handler(callback_query.message)
+        elif action == 'admin_activate_quiz':
+            await activate_quiz_handler(callback_query.message)
+        elif action == 'admin_deactivate_quiz':
+            await deactivate_quiz_handler(callback_query.message)
+        elif action == 'admin_delete_quiz':
+            await delete_quiz_handler(callback_query.message)
+        elif action == 'admin_add_admin':
+            await callback_query.message.reply("Пожалуйста, используйте команду:\n/add_admin @username")
+        elif action == 'admin_help':
+            await help_handler(callback_query.message)
+        await callback_query.answer()
+
     # Команда /activate_quiz
     @dp.message_handler(commands=['activate_quiz'])
     async def activate_quiz_handler(message: types.Message):
@@ -182,7 +205,7 @@ def register_handlers(dp: Dispatcher):
     async def process_quiz_action(callback_query: types.CallbackQuery):
         action, quiz_id = callback_query.data.split('_')
         quiz_id = int(quiz_id)
-        username = callback_query.from_user.username
+        username = callback_query.from_user.username  # Используем from_user
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
@@ -218,7 +241,7 @@ def register_handlers(dp: Dispatcher):
     @dp.callback_query_handler(lambda c: c.data.startswith('confirm_delete_confirm_'))
     async def confirm_delete_quiz(callback_query: types.CallbackQuery):
         quiz_id = int(callback_query.data.split('_')[-1])
-        username = callback_query.from_user.username
+        username = callback_query.from_user.username  # Используем from_user
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
@@ -400,29 +423,6 @@ def register_handlers(dp: Dispatcher):
                 await message.reply(f"Пользователь @{admin_username} удален из списка администраторов.")
             else:
                 await message.reply("Такой администратор не найден.")
-
-    # Обработчик для нажатий на кнопки меню администратора
-    @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
-    async def process_admin_menu(callback_query: types.CallbackQuery, state: FSMContext):
-        action = callback_query.data
-        username = callback_query.from_user.username
-        if not await is_admin(username):
-            await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
-            return
-
-        if action == 'admin_add_quiz':
-            await add_quiz_handler(callback_query.message)
-        elif action == 'admin_activate_quiz':
-            await activate_quiz_handler(callback_query.message)
-        elif action == 'admin_deactivate_quiz':
-            await deactivate_quiz_handler(callback_query.message)
-        elif action == 'admin_delete_quiz':
-            await delete_quiz_handler(callback_query.message)
-        elif action == 'admin_add_admin':
-            await callback_query.message.reply("Пожалуйста, используйте команду:\n/add_admin @username")
-        elif action == 'admin_help':
-            await help_handler(callback_query.message)
-        await callback_query.answer()
 
     # Обработчик для всех сообщений (для тестирования)
     @dp.message_handler()
