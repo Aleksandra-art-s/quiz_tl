@@ -417,7 +417,7 @@ def register_handlers(dp: Dispatcher):
                 quiz_info['title'] = line[len('Название квиза:'):].strip()
             elif line.lower() == 'вопросы:':
                 continue
-            elif line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '10.')):
+            elif line.startswith(tuple(f"{i}." for i in range(1, 101))):
                 if current_question:
                     questions.append(current_question)
                 current_question = {'text': line[line.find('.') + 1:].strip(), 'answer': ''}
@@ -456,5 +456,4 @@ def register_handlers(dp: Dispatcher):
                 await session.commit()
             quiz_info['quiz_id'] = new_quiz.quiz_id
 
-    # Регистрируем обработчики
-    register_handlers(dp)
+# Обратите внимание: вызов функции register_handlers(dp) должен быть только в файле app.py, а не внутри handlers.py.
