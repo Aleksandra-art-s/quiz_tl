@@ -86,11 +86,10 @@ def register_handlers(dp: Dispatcher):
             await message.reply(help_text)
 
     # Обработчик команды /add_quiz
-    @dp.message_handler(commands=['add_quiz'])
-    async def add_quiz_handler(message: types.Message):
-        username = message.from_user.username
+    async def add_quiz_handler(user_id):
+        username = await get_username(user_id)
         if not await is_admin(username):
-            await message.reply("У вас нет прав для выполнения этой команды.")
+            await bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
             return
         instructions = (
             "Пожалуйста, отправьте данные квиза в следующем формате:\n\n"
@@ -109,7 +108,7 @@ def register_handlers(dp: Dispatcher):
             "2. 2 + 2 = ?\n"
             "Ответ: 4\n"
         )
-        await message.reply(instructions)
+        await bot.send_message(user_id, instructions)
         await AdminStates.waiting_for_quiz_data.set()
 
     # Обработчик получения данных квиза
@@ -126,36 +125,41 @@ def register_handlers(dp: Dispatcher):
             await message.reply(f"Ошибка при создании квиза: {str(e)}\nПожалуйста, проверьте формат и попробуйте снова.")
             await state.finish()
 
+    # Функция для получения юзернейма по user_id
+    async def get_username(user_id):
+        user = await bot.get_chat(user_id)
+        return user.username
+
     # Обработчик нажатий на кнопки меню администратора
     @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
     async def process_admin_menu(callback_query: types.CallbackQuery):
         action = callback_query.data
-        username = callback_query.from_user.username  # Используем from_user
+        username = callback_query.from_user.username
+        user_id = callback_query.from_user.id
         logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
             return
 
         if action == 'admin_add_quiz':
-            await add_quiz_handler(callback_query.message)
+            await add_quiz_handler(user_id)
         elif action == 'admin_activate_quiz':
-            await activate_quiz_handler(callback_query.message)
+            await activate_quiz_handler(user_id)
         elif action == 'admin_deactivate_quiz':
-            await deactivate_quiz_handler(callback_query.message)
+            await deactivate_quiz_handler(user_id)
         elif action == 'admin_delete_quiz':
-            await delete_quiz_handler(callback_query.message)
+            await delete_quiz_handler(user_id)
         elif action == 'admin_add_admin':
-            await callback_query.message.reply("Пожалуйста, используйте команду:\n/add_admin @username")
+            await bot.send_message(user_id, "Пожалуйста, используйте команду:\n/add_admin @username")
         elif action == 'admin_help':
-            await help_handler(callback_query.message)
+            await bot.send_message(user_id, "Введите /help для просмотра доступных команд.")
         await callback_query.answer()
 
     # Команда /activate_quiz
-    @dp.message_handler(commands=['activate_quiz'])
-    async def activate_quiz_handler(message: types.Message):
-        username = message.from_user.username
+    async def activate_quiz_handler(user_id):
+        username = await get_username(user_id)
         if not await is_admin(username):
-            await message.reply("У вас нет прав для выполнения этой команды.")
+            await bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
             result = await session.execute(
@@ -163,16 +167,15 @@ def register_handlers(dp: Dispatcher):
             )
             quizzes = result.fetchall()
             if not quizzes:
-                await message.reply("Нет неактивных квизов.")
+                await bot.send_message(user_id, "Нет неактивных квизов.")
                 return
-            await message.reply("Выберите квиз для активации:", reply_markup=quiz_list_keyboard(quizzes, 'activate'))
+            await bot.send_message(user_id, "Выберите квиз для активации:", reply_markup=quiz_list_keyboard(quizzes, 'activate'))
 
     # Команда /deactivate_quiz
-    @dp.message_handler(commands=['deactivate_quiz'])
-    async def deactivate_quiz_handler(message: types.Message):
-        username = message.from_user.username
+    async def deactivate_quiz_handler(user_id):
+        username = await get_username(user_id)
         if not await is_admin(username):
-            await message.reply("У вас нет прав для выполнения этой команды.")
+            await bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
             result = await session.execute(
@@ -180,16 +183,15 @@ def register_handlers(dp: Dispatcher):
             )
             quizzes = result.fetchall()
             if not quizzes:
-                await message.reply("Нет активных квизов.")
+                await bot.send_message(user_id, "Нет активных квизов.")
                 return
-            await message.reply("Выберите квиз для деактивации:", reply_markup=quiz_list_keyboard(quizzes, 'deactivate'))
+            await bot.send_message(user_id, "Выберите квиз для деактивации:", reply_markup=quiz_list_keyboard(quizzes, 'deactivate'))
 
     # Команда /delete_quiz
-    @dp.message_handler(commands=['delete_quiz'])
-    async def delete_quiz_handler(message: types.Message):
-        username = message.from_user.username
+    async def delete_quiz_handler(user_id):
+        username = await get_username(user_id)
         if not await is_admin(username):
-            await message.reply("У вас нет прав для выполнения этой команды.")
+            await bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
             return
         async with async_session() as session:
             result = await session.execute(
@@ -197,16 +199,17 @@ def register_handlers(dp: Dispatcher):
             )
             quizzes = result.fetchall()
             if not quizzes:
-                await message.reply("Нет квизов для удаления.")
+                await bot.send_message(user_id, "Нет квизов для удаления.")
                 return
-            await message.reply("Выберите квиз для удаления:", reply_markup=quiz_list_keyboard(quizzes, 'delete'))
+            await bot.send_message(user_id, "Выберите квиз для удаления:", reply_markup=quiz_list_keyboard(quizzes, 'delete'))
 
     # Обработчик нажатий на кнопки активации, деактивации и удаления квиза
     @dp.callback_query_handler(lambda c: c.data.startswith(('activate_', 'deactivate_', 'delete_')))
     async def process_quiz_action(callback_query: types.CallbackQuery):
         action, quiz_id = callback_query.data.split('_')
         quiz_id = int(quiz_id)
-        username = callback_query.from_user.username  # Используем from_user
+        username = callback_query.from_user.username
+        user_id = callback_query.from_user.id
         logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
@@ -233,9 +236,9 @@ def register_handlers(dp: Dispatcher):
         elif action == 'delete':
             # Запрашиваем подтверждение
             await bot.send_message(
-                callback_query.from_user.id,
+                user_id,
                 "Вы уверены, что хотите удалить этот квиз?",
-                reply_markup=confirm_keyboard(f'delete_confirm_{quiz_id}')
+                reply_markup=confirm_keyboard(f'confirm_delete_confirm_{quiz_id}')
             )
         await callback_query.answer()
 
@@ -243,7 +246,8 @@ def register_handlers(dp: Dispatcher):
     @dp.callback_query_handler(lambda c: c.data.startswith('confirm_delete_confirm_'))
     async def confirm_delete_quiz(callback_query: types.CallbackQuery):
         quiz_id = int(callback_query.data.split('_')[-1])
-        username = callback_query.from_user.username  # Используем from_user
+        username = callback_query.from_user.username
+        user_id = callback_query.from_user.id
         logging.info(f"Проверка администратора в CallbackQuery: '{username}'")
         if not await is_admin(username):
             await callback_query.answer("У вас нет прав для выполнения этой команды.", show_alert=True)
