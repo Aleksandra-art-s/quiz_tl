@@ -7,9 +7,10 @@ def admin_main_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         InlineKeyboardButton("Добавить квиз", callback_data="admin_add_quiz"),
-        InlineKeyboardButton("Активация квиза", callback_data="admin_activate_quiz"),
-        InlineKeyboardButton("Деактивация квиза", callback_data="admin_deactivate_quiz"),
+        InlineKeyboardButton("Активировать квиз", callback_data="admin_activate_quiz"),
+        InlineKeyboardButton("Деактивировать квиз", callback_data="admin_deactivate_quiz"),
         InlineKeyboardButton("Удалить квиз", callback_data="admin_delete_quiz"),
+        InlineKeyboardButton("Добавить администратора", callback_data="admin_add_admin"),
         InlineKeyboardButton("Помощь", callback_data="admin_help"),
     )
     return keyboard
