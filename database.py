@@ -1,7 +1,7 @@
 # database.py
 
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, func
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -38,7 +38,7 @@ class Answer(Base):
     __tablename__ = 'answers'
     answer_id = Column(Integer, primary_key=True)
     question_id = Column(Integer, ForeignKey('questions.question_id'))
-    text = Column(Text, nullable=False)  # Stores the correct answer
+    text = Column(Text, nullable=False)  # Хранит правильный ответ
 
 class UserAttempt(Base):
     __tablename__ = 'user_attempts'
@@ -56,7 +56,7 @@ class UserResponse(Base):
     question_id = Column(Integer, ForeignKey('questions.question_id'))
     selected_answer_text = Column(Text)
 
-# Initialize the database
+# Инициализация базы данных
 from config import DATABASE_URL
 
 engine = create_async_engine(
@@ -71,11 +71,11 @@ async_session = sessionmaker(
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # Add superuser (replace 'your_username' with your actual username)
+    # Добавляем суперпользователя (замените 'maierra' на ваш реальный юзернейм)
     async with async_session() as session:
         result = await session.execute(Admin.__table__.select())
         admins = result.fetchall()
         if not admins:
-            new_admin = Admin(username='MaierrA'.lower())  # Replace with your username
+            new_admin = Admin(username='MaierrA')  # Замените на ваш юзернейм без '@'
             session.add(new_admin)
             await session.commit()
