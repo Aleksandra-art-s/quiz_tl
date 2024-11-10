@@ -9,6 +9,6 @@ from config import API_TOKEN
 logging.basicConfig(level=logging.INFO)
 
 # Инициализируем бота и диспетчер
-bot = Bot(token=7645679841:AAF9Kj-r8PIyFM_vVooVDlrLMF28p4Faf9g)
+bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
