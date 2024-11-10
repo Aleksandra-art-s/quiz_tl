@@ -58,7 +58,23 @@ def register_handlers(dp: Dispatcher):
                 "/delete_quiz - Удалить квиз\n"
                 "/add_admin @username - Добавить администратора\n"
                 "/remove_admin @username - Удалить администратора\n"
-                "/help - Показать это сообщение\n"
+                "/help - Показать это сообщение\n\n"
+                "**Добавление квиза:**\n"
+                "Чтобы добавить новый квиз, используйте команду /add_quiz и следуйте инструкциям. Вам нужно отправить данные квиза в следующем формате:\n\n"
+                "Название квиза: Название вашего квиза\n"
+                "Вопросы:\n"
+                "1. Текст вопроса 1\n"
+                "Ответ: Правильный ответ на вопрос 1\n"
+                "2. Текст вопроса 2\n"
+                "Ответ: Правильный ответ на вопрос 2\n"
+                "...\n\n"
+                "**Пример:**\n"
+                "Название квиза: Общие знания\n"
+                "Вопросы:\n"
+                "1. Столица Франции?\n"
+                "Ответ: Париж\n"
+                "2. 2 + 2 = ?\n"
+                "Ответ: 4\n"
             )
         else:
             help_text = (
@@ -66,7 +82,7 @@ def register_handlers(dp: Dispatcher):
                 "/quiz - Начать квиз\n"
                 "/help - Показать это сообщение\n"
             )
-        await message.reply(help_text)
+        await message.reply(help_text, parse_mode='Markdown')
 
     # Обработчик команды /add_quiz
     @dp.message_handler(commands=['add_quiz'])
@@ -79,9 +95,17 @@ def register_handlers(dp: Dispatcher):
             "Название квиза: Название вашего квиза\n"
             "Вопросы:\n"
             "1. Текст вопроса 1\n"
-            "Ответ: Правильный ответ\n"
+            "Ответ: Правильный ответ на вопрос 1\n"
             "2. Текст вопроса 2\n"
-            "Ответ: Правильный ответ\n"
+            "Ответ: Правильный ответ на вопрос 2\n"
+            "...\n\n"
+            "Пример:\n"
+            "Название квиза: Общие знания\n"
+            "Вопросы:\n"
+            "1. Столица Франции?\n"
+            "Ответ: Париж\n"
+            "2. 2 + 2 = ?\n"
+            "Ответ: 4\n"
         )
         await AdminStates.waiting_for_quiz_data.set()
 
@@ -305,17 +329,25 @@ def register_handlers(dp: Dispatcher):
         await state.finish()
 
     # Обработчики для управления администраторами
-    @dp.message_handler(Command('add_admin'))
+    @dp.message_handler(commands=['add_admin'])
     async def add_admin_handler(message: types.Message):
         if not await is_admin(message.from_user.username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         args = message.get_args()
         if not args:
-            await message.reply("Пожалуйста, укажите юзернейм нового администратора после команды.")
+            await message.reply("Пожалуйста, укажите юзернейм нового администратора после команды, например:\n/add_admin @username")
             return
         new_admin_username = args.strip().lstrip('@')
         async with async_session() as session:
+            # Проверяем, есть ли уже такой администратор
+            result = await session.execute(
+                Admin.__table__.select().where(Admin.username == new_admin_username)
+            )
+            existing_admin = result.fetchone()
+            if existing_admin:
+                await message.reply(f"Пользователь @{new_admin_username} уже является администратором.")
+                return
             new_admin = Admin(username=new_admin_username)
             session.add(new_admin)
             try:
@@ -324,14 +356,14 @@ def register_handlers(dp: Dispatcher):
             except Exception as e:
                 await message.reply(f"Ошибка при добавлении администратора: {e}")
 
-    @dp.message_handler(Command('remove_admin'))
+    @dp.message_handler(commands=['remove_admin'])
     async def remove_admin_handler(message: types.Message):
         if not await is_admin(message.from_user.username):
             await message.reply("У вас нет прав для выполнения этой команды.")
             return
         args = message.get_args()
         if not args:
-            await message.reply("Пожалуйста, укажите юзернейм администратора для удаления после команды.")
+            await message.reply("Пожалуйста, укажите юзернейм администратора для удаления после команды, например:\n/remove_admin @username")
             return
         admin_username = args.strip().lstrip('@')
         async with async_session() as session:
@@ -347,6 +379,24 @@ def register_handlers(dp: Dispatcher):
                 await message.reply(f"Пользователь @{admin_username} удален из списка администраторов.")
             else:
                 await message.reply("Такой администратор не найден.")
+
+    # Обработчик для нажатий на кнопки меню администратора
+    @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
+    async def process_admin_menu(callback_query: types.CallbackQuery):
+        action = callback_query.data
+        if action == 'admin_add_quiz':
+            await add_quiz_handler(callback_query.message)
+        elif action == 'admin_activate_quiz':
+            await activate_quiz_handler(callback_query.message)
+        elif action == 'admin_deactivate_quiz':
+            await deactivate_quiz_handler(callback_query.message)
+        elif action == 'admin_delete_quiz':
+            await delete_quiz_handler(callback_query.message)
+        elif action == 'admin_add_admin':
+            await callback_query.message.reply("Пожалуйста, используйте команду:\n/add_admin @username")
+        elif action == 'admin_help':
+            await help_handler(callback_query.message)
+        await callback_query.answer()
 
     # Обработчик для всех сообщений (для тестирования)
     @dp.message_handler()
@@ -364,12 +414,15 @@ def parse_quiz_data(text):
         line = line.strip()
         if line.startswith('Название квиза:'):
             quiz_info['title'] = line[len('Название квиза:'):].strip()
-        elif line.startswith(('1.', '2.', '3.', '4.', '5.')):
+        elif line.lower() == 'вопросы:':
+            continue
+        elif line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '10.')):
             if current_question:
                 questions.append(current_question)
             current_question = {'text': line[line.find('.') + 1:].strip(), 'answer': ''}
         elif line.startswith('Ответ:'):
-            current_question['answer'] = line[len('Ответ:'):].strip()
+            if current_question:
+                current_question['answer'] = line[len('Ответ:'):].strip()
     if current_question:
         questions.append(current_question)
     quiz_info['questions'] = questions
@@ -401,3 +454,6 @@ async def save_quiz_to_db(quiz_info):
             session.add(new_answer)
             await session.commit()
         quiz_info['quiz_id'] = new_quiz.quiz_id
+
+# Регистрируем обработчики
+register_handlers(dp)
