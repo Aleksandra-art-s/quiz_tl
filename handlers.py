@@ -3,7 +3,6 @@
 import logging
 from aiogram import types, Dispatcher
 from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters import Command
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from datetime import datetime, timedelta
 
@@ -45,7 +44,7 @@ def register_handlers(dp: Dispatcher):
                 "Привет! Готовы начать квиз? Напишите /quiz, чтобы начать.\nВведите /help для просмотра доступных команд."
             )
 
-    # Команда /help
+    # Обработчик команды /help
     @dp.message_handler(commands=['help'])
     async def help_handler(message: types.Message):
         username = message.from_user.username
@@ -60,29 +59,31 @@ def register_handlers(dp: Dispatcher):
                 "/remove_admin @username - Удалить администратора\n"
                 "/help - Показать это сообщение\n\n"
                 "**Добавление квиза:**\n"
-                "Чтобы добавить новый квиз, используйте команду /add_quiz и следуйте инструкциям. Вам нужно отправить данные квиза в следующем формате:\n\n"
+                "Чтобы добавить новый квиз, используйте команду /add\\_quiz и следуйте инструкциям. "
+                "Вам нужно отправить данные квиза в следующем формате:\n\n"
                 "Название квиза: Название вашего квиза\n"
                 "Вопросы:\n"
-                "1. Текст вопроса 1\n"
+                "1\\. Текст вопроса 1\n"
                 "Ответ: Правильный ответ на вопрос 1\n"
-                "2. Текст вопроса 2\n"
+                "2\\. Текст вопроса 2\n"
                 "Ответ: Правильный ответ на вопрос 2\n"
                 "...\n\n"
                 "**Пример:**\n"
                 "Название квиза: Общие знания\n"
                 "Вопросы:\n"
-                "1. Столица Франции?\n"
+                "1\\. Столица Франции?\n"
                 "Ответ: Париж\n"
-                "2. 2 + 2 = ?\n"
+                "2\\. 2 \\+ 2 = ?\n"
                 "Ответ: 4\n"
             )
+            await message.reply(help_text, parse_mode='MarkdownV2')
         else:
             help_text = (
                 "Доступные команды для пользователя:\n"
                 "/quiz - Начать квиз\n"
                 "/help - Показать это сообщение\n"
             )
-        await message.reply(help_text, parse_mode='Markdown')
+            await message.reply(help_text)
 
     # Обработчик команды /add_quiz
     @dp.message_handler(commands=['add_quiz'])
@@ -316,7 +317,7 @@ def register_handlers(dp: Dispatcher):
     async def finish_quiz(chat_id, state: FSMContext):
         data = await state.get_data()
         correct_answers = data.get('correct_answers', 0)
-        attempt_id = data.get('attempt_id')
+        attempt_id = data['attempt_id']
         async with async_session() as session:
             # Обновляем попытку
             await session.execute(
@@ -338,7 +339,7 @@ def register_handlers(dp: Dispatcher):
         if not args:
             await message.reply("Пожалуйста, укажите юзернейм нового администратора после команды, например:\n/add_admin @username")
             return
-        new_admin_username = args.strip().lstrip('@')
+        new_admin_username = args.strip().lstrip('@').lower()
         async with async_session() as session:
             # Проверяем, есть ли уже такой администратор
             result = await session.execute(
@@ -365,7 +366,7 @@ def register_handlers(dp: Dispatcher):
         if not args:
             await message.reply("Пожалуйста, укажите юзернейм администратора для удаления после команды, например:\n/remove_admin @username")
             return
-        admin_username = args.strip().lstrip('@')
+        admin_username = args.strip().lstrip('@').lower()
         async with async_session() as session:
             result = await session.execute(
                 Admin.__table__.select().where(Admin.username == admin_username)
@@ -404,56 +405,56 @@ def register_handlers(dp: Dispatcher):
         logging.info(f"Получено сообщение: {message.text}")
         await message.reply("Бот получил ваше сообщение.")
 
-# Функция для парсинга данных квиза из сообщения
-def parse_quiz_data(text):
-    lines = text.strip().split('\n')
-    quiz_info = {}
-    questions = []
-    current_question = None
-    for line in lines:
-        line = line.strip()
-        if line.startswith('Название квиза:'):
-            quiz_info['title'] = line[len('Название квиза:'):].strip()
-        elif line.lower() == 'вопросы:':
-            continue
-        elif line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '10.')):
-            if current_question:
-                questions.append(current_question)
-            current_question = {'text': line[line.find('.') + 1:].strip(), 'answer': ''}
-        elif line.startswith('Ответ:'):
-            if current_question:
-                current_question['answer'] = line[len('Ответ:'):].strip()
-    if current_question:
-        questions.append(current_question)
-    quiz_info['questions'] = questions
-    return quiz_info
+    # Функция для парсинга данных квиза из сообщения
+    def parse_quiz_data(text):
+        lines = text.strip().split('\n')
+        quiz_info = {}
+        questions = []
+        current_question = None
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Название квиза:'):
+                quiz_info['title'] = line[len('Название квиза:'):].strip()
+            elif line.lower() == 'вопросы:':
+                continue
+            elif line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '10.')):
+                if current_question:
+                    questions.append(current_question)
+                current_question = {'text': line[line.find('.') + 1:].strip(), 'answer': ''}
+            elif line.startswith('Ответ:'):
+                if current_question:
+                    current_question['answer'] = line[len('Ответ:'):].strip()
+        if current_question:
+            questions.append(current_question)
+        quiz_info['questions'] = questions
+        return quiz_info
 
-# Функция для сохранения квиза в базу данных
-async def save_quiz_to_db(quiz_info):
-    async with async_session() as session:
-        new_quiz = Quiz(
-            title=quiz_info['title'],
-            is_active=False,
-            start_time=datetime.utcnow(),
-            end_time=datetime.utcnow() + timedelta(days=7),
-            question_count=len(quiz_info['questions']),
-        )
-        session.add(new_quiz)
-        await session.commit()
-        for q in quiz_info['questions']:
-            new_question = Question(
-                quiz_id=new_quiz.quiz_id,
-                text=q['text']
+    # Функция для сохранения квиза в базу данных
+    async def save_quiz_to_db(quiz_info):
+        async with async_session() as session:
+            new_quiz = Quiz(
+                title=quiz_info['title'],
+                is_active=False,
+                start_time=datetime.utcnow(),
+                end_time=datetime.utcnow() + timedelta(days=7),
+                question_count=len(quiz_info['questions']),
             )
-            session.add(new_question)
+            session.add(new_quiz)
             await session.commit()
-            new_answer = Answer(
-                question_id=new_question.question_id,
-                text=q['answer']
-            )
-            session.add(new_answer)
-            await session.commit()
-        quiz_info['quiz_id'] = new_quiz.quiz_id
+            for q in quiz_info['questions']:
+                new_question = Question(
+                    quiz_id=new_quiz.quiz_id,
+                    text=q['text']
+                )
+                session.add(new_question)
+                await session.commit()
+                new_answer = Answer(
+                    question_id=new_question.question_id,
+                    text=q['answer']
+                )
+                session.add(new_answer)
+                await session.commit()
+            quiz_info['quiz_id'] = new_quiz.quiz_id
 
-# Регистрируем обработчики
-register_handlers(dp)
+    # Регистрируем обработчики
+    register_handlers(dp)
